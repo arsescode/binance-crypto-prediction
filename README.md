@@ -21,7 +21,7 @@ A NestJS application that analyzes RSI values for the top 100 cryptocurrencies f
 
 ```bash
 git clone https://github.com/arsescode/binance-crypto-prediction.git
-cd crypto-prediction-bot
+cd binance-crypto-prediction
 ```
 
 2. Install dependencies:
