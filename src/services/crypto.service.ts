@@ -5,6 +5,8 @@ import { BINANCE_API_URL } from '../config/const.config';
 import { BinanceSymbolMiniModel, BinanceCoinModel } from 'src/models/binance/binance-coin.model';
 import { CoinDto } from 'src/models/dto/coin-dto.model';
 import { CoinPredictionDto } from 'src/models/dto/coin-prediction-dto.model';
+import { ResultDto } from 'src/models/dto/result-dto.model';
+
 @Injectable()
 export class CryptoService {
   private readonly logger = new Logger(CryptoService.name);
@@ -14,7 +16,7 @@ export class CryptoService {
   constructor(private readonly httpService: HttpService) {
 
     this.updateCoinData();
-    
+
 
     setInterval(() => this.updateCoinData(), this.updateInterval);
   }
@@ -26,12 +28,11 @@ export class CryptoService {
       
       for (const coin of topCoins) {
         this.coinsData.set(coin.baseAsset, coin);
-        this.logger.debug(`Updated ${coin.baseAsset} Price: ${coin.lastPrice}`);
       }
       
-      this.logger.log(`RSI data updated for ${topCoins.length} coins`);
+      this.logger.log(`Coins data updated for ${topCoins.length} coins`);
     } catch (error) {
-      this.logger.error(`Error updating RSI data: ${error.message}`);
+      this.logger.error(`Error updating Coins data: ${error.message}`);
     }
   }
 
@@ -127,50 +128,65 @@ export class CryptoService {
     return parseFloat(rsi.toFixed(2));
   }
 
-  async getPrediction(coinName: string): Promise<CoinPredictionDto> {
+  async getPrediction(coinName: string): Promise<ResultDto<CoinPredictionDto | null>> {
+    try {
+      const normalizedCoinName = coinName.toUpperCase().endsWith('USDT') 
+        ? coinName.replace('USDT', '') 
+        : coinName.toUpperCase();
+      
+      if (!this.coinsData.has(normalizedCoinName)) {
+        return ResultDto.notFound(`Coin data not available for ${normalizedCoinName}`);
+      }
+      
+      const coin: BinanceCoinModel = this.coinsData.get(normalizedCoinName)!;
+      const rsi = await this.calculateRSI(coin.symbol);
 
-    const normalizedCoinName = coinName.toUpperCase().endsWith('USDT') 
-      ? coinName.replace('USDT', '') 
-      : coinName.toUpperCase();
-    
-    if (!this.coinsData.has(normalizedCoinName)) {
-      throw new Error(`Coin data not available for ${normalizedCoinName}`);
+      let prediction = '-';
+      
+      if (rsi <= 30) {
+        prediction = 'Up';
+      } else if (rsi >= 70) {
+        prediction = 'Down';
+      } else {
+        prediction = '-';
+      }
+      
+      const predictionData: CoinPredictionDto = {
+        symbol: coin.symbol,
+        baseAsset: normalizedCoinName,
+        rsi,
+        prediction
+      };
+      
+      return ResultDto.success(predictionData, `Successfully retrieved prediction for ${normalizedCoinName}`);
+    } catch (error) {
+      this.logger.error(`Failed to get prediction for ${coinName}: ${error.message}`);
+      return ResultDto.failed(`Failed to get prediction: ${error.message}`);
     }
-    
-    const coin: BinanceCoinModel = this.coinsData.get(normalizedCoinName)!;
-
-    const rsi = await this.calculateRSI(coin.symbol);
-
-    let prediction = '-';
-    
-    if (rsi <= 30) {
-      prediction = 'Up';
-    } else if (rsi >= 70) {
-      prediction = 'Down';
-    } else {
-      prediction = '-';
-    }
-    
-    return {
-      symbol: normalizedCoinName,
-      baseAsset: coinName.replace('USDT', ''),
-      rsi,
-      prediction
-    };
   }
 
-  async getAllCoins(): Promise<Array<CoinDto>> {
-
-    if (this.coinsData.size === 0) {
-      await this.getTopCoins();
+  async getAllCoins(): Promise<ResultDto<CoinDto[] | null>> {
+    try {
+      if (this.coinsData.size === 0) {
+        await this.updateCoinData();
+      }
+      
+      if (this.coinsData.size === 0) {
+        return ResultDto.failed('Failed to retrieve coin data');
+      }
+      
+      const coins = Array.from(this.coinsData.values()).map(coin => ({
+        symbol: coin.symbol,
+        baseAsset: coin.baseAsset,
+        lastPrice: coin.lastPrice,
+        volume: coin.volume,
+        quoteVolume: coin.quoteVolume
+      }));
+      
+      return ResultDto.success(coins, 'Successfully retrieved all coins');
+    } catch (error) {
+      this.logger.error(`Failed to get all coins: ${error.message}`);
+      return ResultDto.serverError(`Failed to retrieve coins: ${error.message}`);
     }
-    
-    return Array.from(this.coinsData.values()).map(coin => ({
-      symbol: coin.symbol,
-      baseAsset: coin.baseAsset,
-      lastPrice: coin.lastPrice,
-      volume: coin.volume,
-      quoteVolume: coin.quoteVolume
-    }));
   }
 }
